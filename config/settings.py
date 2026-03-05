@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-#2-h$tqr$o0o$2b^zrg=@_x7!g(3tzy6e#&t103_&n=jpq_5nj
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()]
 
 
 # Application definition
@@ -126,6 +126,9 @@ STATIC_URL = 'static/'
 
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
 }
 
 SPECTACULAR_SETTINGS = {

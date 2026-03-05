@@ -1,5 +1,68 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, Route, Routes, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
+
+const ACCESS_TOKEN_KEY = 'access_token'
+const REFRESH_TOKEN_KEY = 'refresh_token'
+
+const getAccessToken = () => localStorage.getItem(ACCESS_TOKEN_KEY)
+const getRefreshToken = () => localStorage.getItem(REFRESH_TOKEN_KEY)
+const saveTokens = ({ access, refresh }) => {
+  localStorage.setItem(ACCESS_TOKEN_KEY, access)
+  localStorage.setItem(REFRESH_TOKEN_KEY, refresh)
+}
+const clearTokens = () => {
+  localStorage.removeItem(ACCESS_TOKEN_KEY)
+  localStorage.removeItem(REFRESH_TOKEN_KEY)
+}
+
+const authenticatedFetch = async (url, options = {}) => {
+  const request = async (token) => {
+    const headers = new Headers(options.headers || {})
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    return fetch(url, { ...options, headers })
+  }
+
+  let response = await request(getAccessToken())
+  if (response.status !== 401) return response
+
+  const refresh = getRefreshToken()
+  if (!refresh) return response
+
+  const refreshResponse = await fetch('/api/auth/token/refresh/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh }),
+  })
+  if (!refreshResponse.ok) {
+    clearTokens()
+    return response
+  }
+  const refreshData = await refreshResponse.json()
+  saveTokens({ access: refreshData.access, refresh })
+  response = await request(refreshData.access)
+  return response
+}
+
+function LogoutButton() {
+  const navigate = useNavigate()
+  return (
+    <button
+      type="button"
+      className="logoutBtn"
+      onClick={() => {
+        clearTokens()
+        navigate('/login')
+      }}
+    >
+      <svg className="logoutIcon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M9 4h-3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3" stroke="currentColor" strokeWidth="2" />
+        <path d="M16 17l5-5-5-5" stroke="currentColor" strokeWidth="2" />
+        <path d="M21 12H9" stroke="currentColor" strokeWidth="2" />
+      </svg>
+      Выйти
+    </button>
+  )
+}
 
 const getRawReviewValue = (review, key) => {
   if (!review?.review_dict) return ''
@@ -56,7 +119,12 @@ function ListPage() {
     setLoading(true)
     setMessage('')
     try {
-      const response = await fetch('/api/reviews/')
+      const response = await authenticatedFetch('/api/reviews/')
+      if (response.status === 401) {
+        clearTokens()
+        navigate('/login')
+        return
+      }
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
         setMessage(data.detail ?? 'Не удалось загрузить список')
@@ -77,7 +145,7 @@ function ListPage() {
 
   useEffect(() => {
     loadReviews()
-  }, [])
+  }, [navigate])
 
   const filteredReviews = useMemo(() => {
     const normalizedOrderQuery = orderQuery.trim().toLowerCase()
@@ -119,6 +187,7 @@ function ListPage() {
         <button type="button" onClick={loadReviews} disabled={loading}>
           {loading ? 'Загрузка...' : 'Обновить'}
         </button>
+        <LogoutButton />
       </header>
 
       {message && <p className="banner">{message}</p>}
@@ -250,6 +319,7 @@ function DetailPage() {
   const [review, setReview] = useState(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const navigate = useNavigate()
   const data = review?.review_dict ?? {}
   const comment = data.comment ?? {}
   const feedback = data.feedback ?? {}
@@ -269,7 +339,12 @@ function DetailPage() {
       setLoading(true)
       setMessage('')
       try {
-        const response = await fetch(`/api/reviews/${encodeURIComponent(orderNumber)}/`)
+        const response = await authenticatedFetch(`/api/reviews/${encodeURIComponent(orderNumber)}/`)
+        if (response.status === 401) {
+          clearTokens()
+          navigate('/login')
+          return
+        }
         const data = await response.json().catch(() => ({}))
         if (!response.ok) {
           setMessage(data.detail ?? 'Не удалось загрузить детали отзыва')
@@ -285,7 +360,7 @@ function DetailPage() {
       }
     }
     loadDetail()
-  }, [orderNumber])
+  }, [orderNumber, navigate])
 
   return (
     <main className="page">
@@ -298,6 +373,7 @@ function DetailPage() {
         <Link to="/" className="linkBtn">
           Назад к списку
         </Link>
+        <LogoutButton />
       </header>
 
       {message && <p className="banner">{message}</p>}
@@ -409,11 +485,105 @@ function DetailPage() {
   )
 }
 
+function LoginPage() {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState('')
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (getAccessToken()) navigate('/')
+  }, [navigate])
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setLoading(true)
+    setMessage('')
+    try {
+      const response = await fetch('/api/auth/token/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setMessage('Неверный логин или пароль')
+        return
+      }
+      saveTokens({ access: data.access, refresh: data.refresh })
+      navigate('/')
+    } catch {
+      setMessage('Бэкенд недоступен')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <main className="page">
+      <section className="panel authPanel">
+        <div className="titleWrap">
+          <p className="eyebrow">Kaspi Reviews</p>
+          <h1>Вход</h1>
+          <p className="sub">Авторизуйтесь для доступа к отзывам</p>
+        </div>
+        {message && <p className="banner">{message}</p>}
+        <form onSubmit={handleSubmit} className="authForm">
+          <div className="filterItem">
+            <label htmlFor="username">Логин</label>
+            <input
+              id="username"
+              type="text"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              required
+            />
+          </div>
+          <div className="filterItem">
+            <label htmlFor="password">Пароль</label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+          </div>
+          <button type="submit" disabled={loading}>
+            {loading ? 'Вход...' : 'Войти'}
+          </button>
+        </form>
+      </section>
+    </main>
+  )
+}
+
+function RequireAuth({ children }) {
+  if (!getAccessToken()) return <Navigate to="/login" replace />
+  return children
+}
+
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<ListPage />} />
-      <Route path="/reviews/:orderNumber" element={<DetailPage />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/"
+        element={
+          <RequireAuth>
+            <ListPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/reviews/:orderNumber"
+        element={
+          <RequireAuth>
+            <DetailPage />
+          </RequireAuth>
+        }
+      />
     </Routes>
   )
 }

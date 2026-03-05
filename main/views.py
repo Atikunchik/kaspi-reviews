@@ -2,6 +2,7 @@ from django.conf import settings
 from drf_spectacular.utils import extend_schema
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
+from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -21,6 +22,8 @@ def _serialize_document(document: dict) -> dict:
 
 
 class ReviewListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
     @extend_schema(
         operation_id="reviews_list",
         responses={200: ReviewListRetrieveSerializer(many=True)},
@@ -54,6 +57,8 @@ class ReviewListCreateView(APIView):
 
 
 class ReviewDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
     @extend_schema(
         operation_id="reviews_retrieve",
         responses={200: ReviewListRetrieveSerializer},

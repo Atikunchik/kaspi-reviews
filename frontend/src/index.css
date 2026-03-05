@@ -84,6 +84,17 @@ h2 {
   box-shadow: 0 16px 40px rgba(40, 62, 99, 0.08);
 }
 
+.authPanel {
+  max-width: 520px;
+  margin: 48px auto 0;
+}
+
+.authForm {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .detailPanel {
   min-height: 320px;
 }
@@ -137,6 +148,22 @@ button {
   color: #fff;
   padding: 9px 14px;
   text-decoration: none;
+}
+
+.logoutBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #9a3f3f;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #b34a4a, #8f3030);
+  color: #fff;
+  padding: 9px 12px;
+}
+
+.logoutIcon {
+  width: 16px;
+  height: 16px;
 }
 
 button:disabled {
