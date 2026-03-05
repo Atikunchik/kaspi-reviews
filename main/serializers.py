@@ -50,3 +50,12 @@ class ReviewListRetrieveSerializer(serializers.Serializer):
     order_number = serializers.CharField(max_length=255)
     is_reviewed = serializers.BooleanField()
     review_dict = ReviewDictSerializer()
+
+
+class ProductIdListSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    name = serializers.CharField(allow_blank=True, required=False)
+
+
+class ProductListSerializer(serializers.Serializer):
+    products = ProductIdListSerializer(many=True)
