@@ -617,6 +617,7 @@ function ListPage() {
                 <th>Товар</th>
                 <th>Телефон</th>
                 <th>Оценка</th>
+                <th>👍</th>
                 <th>Дата</th>
                 <th>Статус</th>
                 <th>Действие</th>
@@ -633,6 +634,7 @@ function ListPage() {
                       {getRatingMeta(summaryValue(review, 'rating')).text}
                     </span>
                   </td>
+                  <td className="mono">{review?.review_dict?.feedback?.positive ?? '—'}</td>
                   <td>{summaryValue(review, 'date')}</td>
                   <td>
                     <span className={`statusBadge ${review.is_reviewed ? 'read' : 'unread'}`}>
