@@ -1841,7 +1841,7 @@ function ProductDetailPage() {
           <section className="panel pbiChartPanel">
             <div className="pbiChartHead">
               <div>
-                <h2 className="pbiChartTitle">Отзывы по товару</h2>
+                <h2 className="pbiChartTitle">Самые популярные отзывы</h2>
                 <p className="pbiChartSub">
                   {reviewsLoading ? 'Загрузка...' : `${reviewsTotal.toLocaleString('ru-RU')} отзывов`}
                 </p>
