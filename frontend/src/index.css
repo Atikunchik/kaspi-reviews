@@ -695,6 +695,25 @@ tbody tr.unreadRow:hover { background: rgba(255, 107, 53, 0.09); }
   transform: none;
 }
 
+/* ─── Back button (topbar) ─── */
+.backBtn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-sm);
+  color: var(--t-2);
+  padding: 6px 14px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.backBtn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.05);
+  border-color: var(--t-3);
+  box-shadow: none;
+  transform: none;
+}
+
 /* ═══════════════════════════════════════════
    PAGINATION
 ═══════════════════════════════════════════ */

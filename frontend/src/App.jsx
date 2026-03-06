@@ -750,6 +750,7 @@ function DetailPage() {
           <h1>Детали отзыва</h1>
           <p className="sub mono">Заказ: {orderNumber}</p>
         </div>
+        <button type="button" className="backBtn" onClick={() => navigate(-1)}>← Назад</button>
       </header>
 
       {message && <p className="banner">{message}</p>}
