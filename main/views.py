@@ -148,7 +148,16 @@ class ReviewListCreateView(APIView):
         if second_match:
             pipeline.append({"$match": second_match})
 
-        pipeline.append({"$sort": {"parsed_date": -1}})
+        sort_field_map = {
+            "date": "parsed_date",
+            "feedback_positive": "review_dict.feedback.positive",
+            "rating": "rating_int",
+        }
+        sort_by_param = request.query_params.get("sort_by", "date")
+        sort_dir_param = request.query_params.get("sort_dir", "desc")
+        sort_field = sort_field_map.get(sort_by_param, "parsed_date")
+        sort_dir_val = -1 if sort_dir_param == "desc" else 1
+        pipeline.append({"$sort": {sort_field: sort_dir_val}})
 
         skip = (page - 1) * page_size
         pipeline.append({

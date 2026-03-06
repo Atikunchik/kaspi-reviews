@@ -1431,6 +1431,8 @@ function ProductDetailPage() {
           page: String(reviewsPage),
           page_size: String(reviewsPageSize),
           status: 'all',
+          sort_by: 'feedback_positive',
+          sort_dir: 'desc',
         })
         if (dateFrom) params.set('date_from', dateFrom)
         if (dateTo) params.set('date_to', dateTo)
@@ -1850,40 +1852,48 @@ function ProductDetailPage() {
                 <thead>
                   <tr>
                     <th>Номер заказа</th>
-                    <th>Товар</th>
                     <th>Телефон</th>
                     <th>Оценка</th>
                     <th>👍</th>
+                    <th>Комментарий</th>
                     <th>Дата</th>
                     <th>Статус</th>
                     <th>Действие</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {reviews.map((review) => (
-                    <tr key={review.order_number} className={!review.is_reviewed ? 'unreadRow' : ''}>
-                      <td className={`mono ${!review.is_reviewed ? 'unreadText' : ''}`}>{review.order_number}</td>
-                      <td>{review?.review_dict?.product?.name || 'Нет данных'}</td>
-                      <td>{summaryValue(review, 'phone_number')}</td>
-                      <td>
-                        <span className={`ratingBadge ${getRatingMeta(summaryValue(review, 'rating')).className}`}>
-                          {getRatingMeta(summaryValue(review, 'rating')).text}
-                        </span>
-                      </td>
-                      <td className="mono">{review?.review_dict?.feedback?.positive ?? '—'}</td>
-                      <td>{summaryValue(review, 'date')}</td>
-                      <td>
-                        <span className={`statusBadge ${review.is_reviewed ? 'read' : 'unread'}`}>
-                          {review.is_reviewed ? 'Просмотрено' : 'Не просмотрено'}
-                        </span>
-                      </td>
-                      <td>
-                        <button type="button" className="openBtn" onClick={() => navigate(`/reviews/${review.order_number}`)}>
-                          Открыть →
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {reviews.map((review) => {
+                    const comment = review?.review_dict?.comment || {}
+                    return (
+                      <tr key={review.order_number} className={!review.is_reviewed ? 'unreadRow' : ''}>
+                        <td className={`mono ${!review.is_reviewed ? 'unreadText' : ''}`}>{review.order_number}</td>
+                        <td>{summaryValue(review, 'phone_number')}</td>
+                        <td>
+                          <span className={`ratingBadge ${getRatingMeta(summaryValue(review, 'rating')).className}`}>
+                            {getRatingMeta(summaryValue(review, 'rating')).text}
+                          </span>
+                        </td>
+                        <td className="mono">{review?.review_dict?.feedback?.positive ?? '—'}</td>
+                        <td className="reviewCommentCell">
+                          {comment.plus  && <p className="reviewCommentPlus">+ {comment.plus}</p>}
+                          {comment.minus && <p className="reviewCommentMinus">− {comment.minus}</p>}
+                          {comment.text  && <p className="reviewCommentText">{comment.text}</p>}
+                          {!comment.plus && !comment.minus && !comment.text && <span className="sub">—</span>}
+                        </td>
+                        <td>{summaryValue(review, 'date')}</td>
+                        <td>
+                          <span className={`statusBadge ${review.is_reviewed ? 'read' : 'unread'}`}>
+                            {review.is_reviewed ? 'Просмотрено' : 'Не просмотрено'}
+                          </span>
+                        </td>
+                        <td>
+                          <button type="button" className="openBtn" onClick={() => navigate(`/reviews/${review.order_number}`)}>
+                            Открыть →
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
               {!reviewsLoading && !reviews.length && <p className="sub">Отзывы не найдены</p>}
