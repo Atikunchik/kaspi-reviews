@@ -400,6 +400,7 @@ function ListPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [statusFilter, setStatusFilter] = useState('all')
+  const [editableFilter, setEditableFilter] = useState('all')
   const [ratingFilters, setRatingFilters] = useState([])
   const [productFilters, setProductFilters] = useState([])
   const [dateFrom, setDateFrom] = useState('')
@@ -428,7 +429,7 @@ function ListPage() {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [statusFilter, ratingFilters, productFilters, dateFrom, dateTo, debouncedOrderQuery, debouncedPhoneQuery, debouncedProductNameQuery, pageSize])
+  }, [statusFilter, editableFilter, ratingFilters, productFilters, dateFrom, dateTo, debouncedOrderQuery, debouncedPhoneQuery, debouncedProductNameQuery, pageSize])
 
   useEffect(() => {
     let cancelled = false
@@ -440,6 +441,7 @@ function ListPage() {
           page: String(currentPage),
           page_size: String(pageSize),
           status: statusFilter,
+          editable: editableFilter,
         })
         if (ratingFilters.length) params.set('ratings', ratingFilters.join(','))
         if (productFilters.length) params.set('product_ids', productFilters.join(','))
@@ -468,7 +470,7 @@ function ListPage() {
     }
     load()
     return () => { cancelled = true }
-  }, [currentPage, pageSize, statusFilter, ratingFilters, productFilters, dateFrom, dateTo, debouncedOrderQuery, debouncedPhoneQuery, debouncedProductNameQuery, navigate, refreshKey])
+  }, [currentPage, pageSize, statusFilter, editableFilter, ratingFilters, productFilters, dateFrom, dateTo, debouncedOrderQuery, debouncedPhoneQuery, debouncedProductNameQuery, navigate, refreshKey])
 
   const ratingFilterLabel =
     ratingFilters.length === 0
@@ -507,6 +509,19 @@ function ListPage() {
                 { value: 'all', label: 'Все' },
                 { value: 'viewed', label: 'Просмотрено' },
                 { value: 'not_viewed', label: 'Не просмотрено' },
+              ]}
+            />
+          </div>
+          <div className="filterItem">
+            <label htmlFor="editableFilter">Редактируемые</label>
+            <Select
+              id="editableFilter"
+              value={editableFilter}
+              onChange={(e) => setEditableFilter(e.target.value)}
+              options={[
+                { value: 'all', label: 'Все' },
+                { value: 'true', label: 'Да' },
+                { value: 'false', label: 'Нет' },
               ]}
             />
           </div>
@@ -580,6 +595,7 @@ function ListPage() {
               type="button"
               onClick={() => {
                 setStatusFilter('all')
+                setEditableFilter('all')
                 setRatingFilters([])
                 setProductFilters([])
                 setDateFrom('')
