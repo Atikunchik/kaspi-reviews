@@ -1855,7 +1855,6 @@ function ProductDetailPage() {
                     <th>Телефон</th>
                     <th>Оценка</th>
                     <th>👍</th>
-                    <th>Комментарий</th>
                     <th>Дата</th>
                     <th>Статус</th>
                     <th>Действие</th>
@@ -1864,34 +1863,42 @@ function ProductDetailPage() {
                 <tbody>
                   {reviews.map((review) => {
                     const comment = review?.review_dict?.comment || {}
+                    const hasComment = comment.plus || comment.minus || comment.text
                     return (
-                      <tr key={review.order_number} className={!review.is_reviewed ? 'unreadRow' : ''}>
-                        <td className={`mono ${!review.is_reviewed ? 'unreadText' : ''}`}>{review.order_number}</td>
-                        <td>{summaryValue(review, 'phone_number')}</td>
-                        <td>
-                          <span className={`ratingBadge ${getRatingMeta(summaryValue(review, 'rating')).className}`}>
-                            {getRatingMeta(summaryValue(review, 'rating')).text}
-                          </span>
-                        </td>
-                        <td className="mono">{review?.review_dict?.feedback?.positive ?? '—'}</td>
-                        <td className="reviewCommentCell">
-                          {comment.plus  && <p className="reviewCommentPlus">+ {comment.plus}</p>}
-                          {comment.minus && <p className="reviewCommentMinus">− {comment.minus}</p>}
-                          {comment.text  && <p className="reviewCommentText">{comment.text}</p>}
-                          {!comment.plus && !comment.minus && !comment.text && <span className="sub">—</span>}
-                        </td>
-                        <td>{summaryValue(review, 'date')}</td>
-                        <td>
-                          <span className={`statusBadge ${review.is_reviewed ? 'read' : 'unread'}`}>
-                            {review.is_reviewed ? 'Просмотрено' : 'Не просмотрено'}
-                          </span>
-                        </td>
-                        <td>
-                          <button type="button" className="openBtn" onClick={() => navigate(`/reviews/${review.order_number}`)}>
-                            Открыть →
-                          </button>
-                        </td>
-                      </tr>
+                      <>
+                        <tr key={review.order_number} className={[!review.is_reviewed ? 'unreadRow' : '', hasComment ? 'hasCommentRow' : ''].filter(Boolean).join(' ')}>
+                          <td className={`mono ${!review.is_reviewed ? 'unreadText' : ''}`}>{review.order_number}</td>
+                          <td>{summaryValue(review, 'phone_number')}</td>
+                          <td>
+                            <span className={`ratingBadge ${getRatingMeta(summaryValue(review, 'rating')).className}`}>
+                              {getRatingMeta(summaryValue(review, 'rating')).text}
+                            </span>
+                          </td>
+                          <td className="mono">{review?.review_dict?.feedback?.positive ?? '—'}</td>
+                          <td>{summaryValue(review, 'date')}</td>
+                          <td>
+                            <span className={`statusBadge ${review.is_reviewed ? 'read' : 'unread'}`}>
+                              {review.is_reviewed ? 'Просмотрено' : 'Не просмотрено'}
+                            </span>
+                          </td>
+                          <td>
+                            <button type="button" className="openBtn" onClick={() => navigate(`/reviews/${review.order_number}`)}>
+                              Открыть →
+                            </button>
+                          </td>
+                        </tr>
+                        {hasComment && (
+                          <tr key={`${review.order_number}-comment`} className="reviewCommentRow">
+                            <td colSpan={7}>
+                              <div className="reviewCommentBlock">
+                                {comment.plus  && <span className="reviewCommentPlus">👍 {comment.plus}</span>}
+                                {comment.minus && <span className="reviewCommentMinus">👎 {comment.minus}</span>}
+                                {comment.text  && <span className="reviewCommentText">💬 {comment.text}</span>}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     )
                   })}
                 </tbody>

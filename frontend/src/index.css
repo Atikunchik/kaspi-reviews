@@ -2145,7 +2145,10 @@ pre {
   border-radius: var(--r-full);
 }
 
-/* Review comment row in product detail list */
+/* Review comment row — fused with the row above into one visual item */
+.hasCommentRow td {
+  border-bottom: none !important;
+}
 .reviewCommentRow td {
   padding: 0 !important;
   border-top: none !important;
@@ -2153,11 +2156,9 @@ pre {
 .reviewCommentBlock {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 24px;
-  padding: 6px 14px 10px 14px;
-  background: rgba(255,255,255,0.02);
-  border-bottom: 1px solid var(--border);
-  font-size: 0.84rem;
+  gap: 6px 20px;
+  padding: 4px 14px 10px 14px;
+  font-size: 0.83rem;
   line-height: 1.5;
 }
 .reviewCommentPlus  { color: var(--green-text); }
