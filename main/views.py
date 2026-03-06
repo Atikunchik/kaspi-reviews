@@ -49,6 +49,7 @@ class ReviewListCreateView(APIView):
 
         status_filter = request.query_params.get("status", "all")
         ratings_str = request.query_params.get("ratings", "")
+        min_positive_str = request.query_params.get("min_positive", "")
         product_ids_str = request.query_params.get("product_ids", "")
         date_from_str = request.query_params.get("date_from", "")
         date_to_str = request.query_params.get("date_to", "")
@@ -88,6 +89,14 @@ class ReviewListCreateView(APIView):
 
         if product_name_query:
             base_match["review_dict.product.name"] = {"$regex": re.escape(product_name_query), "$options": "i"}
+
+        if min_positive_str:
+            try:
+                min_positive = int(min_positive_str)
+                if min_positive > 0:
+                    base_match["review_dict.feedback.positive"] = {"$gte": min_positive}
+            except (ValueError, TypeError):
+                pass
 
         rating_ints = [
             int(r) for r in ratings_str.split(",")

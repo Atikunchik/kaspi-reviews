@@ -407,6 +407,7 @@ function ListPage() {
   const [orderQuery, setOrderQuery] = useState('')
   const [phoneQuery, setPhoneQuery] = useState('')
   const [productNameQuery, setProductNameQuery] = useState('')
+  const [minPositive, setMinPositive] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
   const navigate = useNavigate()
 
@@ -428,7 +429,7 @@ function ListPage() {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [statusFilter, ratingFilters, productFilters, dateFrom, dateTo, debouncedOrderQuery, debouncedPhoneQuery, debouncedProductNameQuery, pageSize])
+  }, [statusFilter, ratingFilters, productFilters, dateFrom, dateTo, debouncedOrderQuery, debouncedPhoneQuery, debouncedProductNameQuery, minPositive, pageSize])
 
   useEffect(() => {
     let cancelled = false
@@ -448,6 +449,7 @@ function ListPage() {
         if (debouncedOrderQuery) params.set('order_number', debouncedOrderQuery)
         if (debouncedPhoneQuery) params.set('phone', debouncedPhoneQuery)
         if (debouncedProductNameQuery) params.set('product_name', debouncedProductNameQuery)
+        if (minPositive) params.set('min_positive', minPositive)
 
         const response = await authenticatedFetch(`/api/reviews/?${params}`)
         if (response.status === 401) { clearTokens(); navigate('/login'); return }
@@ -468,7 +470,7 @@ function ListPage() {
     }
     load()
     return () => { cancelled = true }
-  }, [currentPage, pageSize, statusFilter, ratingFilters, productFilters, dateFrom, dateTo, debouncedOrderQuery, debouncedPhoneQuery, debouncedProductNameQuery, navigate, refreshKey])
+  }, [currentPage, pageSize, statusFilter, ratingFilters, productFilters, dateFrom, dateTo, debouncedOrderQuery, debouncedPhoneQuery, debouncedProductNameQuery, minPositive, navigate, refreshKey])
 
   const ratingFilterLabel =
     ratingFilters.length === 0
@@ -575,6 +577,17 @@ function ListPage() {
               onChange={(event) => setPhoneQuery(event.target.value)}
             />
           </div>
+          <div className="filterItem filterItemSearch">
+            <label htmlFor="minPositive">Мин. полезных голосов</label>
+            <input
+              id="minPositive"
+              type="number"
+              min={1}
+              placeholder="Например: 1"
+              value={minPositive}
+              onChange={(e) => setMinPositive(e.target.value)}
+            />
+          </div>
           <div className="filterItem filterActions">
             <button
               type="button"
@@ -587,6 +600,7 @@ function ListPage() {
                 setOrderQuery('')
                 setPhoneQuery('')
                 setProductNameQuery('')
+                setMinPositive('')
                 setPageSize(20)
                 setCurrentPage(1)
               }}
