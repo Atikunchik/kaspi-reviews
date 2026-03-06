@@ -92,7 +92,7 @@ class KaspiShopParserClient:
 
     def get_all_reviews(self, merchant: str = "1Fit", limit: int = 10) -> list:
         headers = {**self.HEADERS, "Cookie": os.getenv("KASPI_COOKIE", "")}
-        url = f"https://kaspi.kz/yml/review-view/api/v1/reviews/merchant/{merchant}?limit={limit}&page=0&sort=DATE&days=100"
+        url = f"https://kaspi.kz/yml/review-view/api/v1/reviews/merchant/{merchant}?limit={limit}&page=0&sort=DATE&days=365"
         response = requests.get(
             url=url,
             headers=headers,

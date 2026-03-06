@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 const ACCESS_TOKEN_KEY = 'access_token'
 const REFRESH_TOKEN_KEY = 'refresh_token'
@@ -200,6 +200,91 @@ function Select({ id, value, onChange, options, className = '' }) {
   )
 }
 
+function CheckboxDropdown({ id, label, items, selected, onToggle, searchable = false, fetchItems }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [asyncItems, setAsyncItems] = useState(null)
+  const [fetching, setFetching] = useState(false)
+  const ref = useRef(null)
+  const debouncedSearch = useDebounce(search, 300)
+
+  useEffect(() => {
+    if (!open) {
+      setSearch('')
+      setAsyncItems(null)
+      setFetching(false)
+      return
+    }
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  useEffect(() => {
+    if (!open || !fetchItems) return
+    let cancelled = false
+    setFetching(true)
+    fetchItems(debouncedSearch)
+      .then((results) => { if (!cancelled) { setAsyncItems(results); setFetching(false) } })
+      .catch(() => { if (!cancelled) setFetching(false) })
+    return () => { cancelled = true }
+  }, [debouncedSearch, open, fetchItems])
+
+  const displayItems = fetchItems ? (asyncItems ?? []) : (
+    searchable && search
+      ? items.filter((item) => item.label.toLowerCase().includes(search.toLowerCase()))
+      : items
+  )
+
+  return (
+    <div ref={ref} className={`checkboxDropdown ${open ? 'isOpen' : ''}`}>
+      <button
+        id={id}
+        type="button"
+        className="checkboxDropdownTrigger"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="checkboxDropdownValue">{label}</span>
+        <svg className="customSelectChevron" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="checkboxDropdownMenu">
+          {searchable && (
+            <input
+              className="checkboxDropdownSearch"
+              type="text"
+              placeholder="Поиск по названию..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          )}
+          <div className={`checkboxDropdownList${searchable ? ' checkboxDropdownListProducts' : ''}`}>
+            {fetching ? (
+              <span className="sub">Загрузка...</span>
+            ) : (
+              <>
+                {displayItems.map((item) => (
+                  <label key={item.value} className="ratingCheck">
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(item.value)}
+                      onChange={(e) => onToggle(item.value, e.target.checked, item.label)}
+                    />
+                    <span>{item.label}</span>
+                  </label>
+                ))}
+                {displayItems.length === 0 && <span className="sub">Ничего не найдено</span>}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function LogoutButton() {
   const navigate = useNavigate()
   return (
@@ -259,22 +344,6 @@ const normalizeRating = (value) => {
   return Math.round(rating)
 }
 
-const dateToTs = (value) => {
-  if (!value || typeof value !== 'string') return 0
-  const parts = value.split('.')
-  if (parts.length !== 3) return 0
-  const [day, month, year] = parts.map((item) => Number(item))
-  if (!day || !month || !year) return 0
-  return new Date(year, month - 1, day).getTime()
-}
-
-const inputDateToTs = (value, isEndOfDay = false) => {
-  if (!value) return 0
-  const [year, month, day] = value.split('-').map((item) => Number(item))
-  if (!year || !month || !day) return 0
-  if (isEndOfDay) return new Date(year, month - 1, day, 23, 59, 59, 999).getTime()
-  return new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
-}
 
 const parseReviewDate = (value) => {
   if (!value || typeof value !== 'string') return null
@@ -313,9 +382,19 @@ const getBucketMeta = (date, mode) => {
   return { key: `d-${date.getTime()}`, label: formatAsDDMMYYYY(date), ts: date.getTime() }
 }
 
+function useDebounce(value, delay) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+  return debounced
+}
+
 function ListPage() {
   const [reviews, setReviews] = useState([])
-  const [products, setProducts] = useState([])
+  const [total, setTotal] = useState(0)
+  const [selectedProductMeta, setSelectedProductMeta] = useState({})
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
@@ -328,132 +407,90 @@ function ListPage() {
   const [orderQuery, setOrderQuery] = useState('')
   const [phoneQuery, setPhoneQuery] = useState('')
   const [productNameQuery, setProductNameQuery] = useState('')
-  const [productSearch, setProductSearch] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
   const navigate = useNavigate()
 
-  const loadReviews = async () => {
-    setLoading(true)
-    setMessage('')
-    try {
-      const response = await authenticatedFetch('/api/reviews/')
-      if (response.status === 401) {
-        clearTokens()
-        navigate('/login')
-        return
-      }
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        setMessage(data.detail ?? 'Не удалось загрузить список')
-        return
-      }
-      const sorted = (Array.isArray(data) ? data : []).sort((a, b) => {
-        const dateA = dateToTs(a?.review_dict?.date)
-        const dateB = dateToTs(b?.review_dict?.date)
-        return dateB - dateA
-      })
-      setReviews(sorted)
+  const debouncedOrderQuery = useDebounce(orderQuery, 400)
+  const debouncedPhoneQuery = useDebounce(phoneQuery, 400)
+  const debouncedProductNameQuery = useDebounce(productNameQuery, 400)
 
-      const productsResponse = await authenticatedFetch('/api/products/ids/')
-      if (productsResponse.status === 401) {
-        clearTokens()
-        navigate('/login')
-        return
-      }
-      const productsData = await productsResponse.json().catch(() => ({}))
-      if (productsResponse.ok) {
-        setProducts(Array.isArray(productsData.products) ? productsData.products : [])
-      }
-    } catch {
-      setMessage('Бэкенд недоступен')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const fetchProducts = useCallback(async (search) => {
+    const params = new URLSearchParams()
+    if (search) params.set('search', search)
+    const res = await authenticatedFetch(`/api/products/ids/?${params}`)
+    if (!res.ok) return []
+    const data = await res.json().catch(() => ({}))
+    return (Array.isArray(data.products) ? data.products : []).map((p) => ({
+      value: p.id,
+      label: p.name || p.id,
+    }))
+  }, [])
 
   useEffect(() => {
-    loadReviews()
-  }, [navigate])
+    setCurrentPage(1)
+  }, [statusFilter, ratingFilters, productFilters, dateFrom, dateTo, debouncedOrderQuery, debouncedPhoneQuery, debouncedProductNameQuery, pageSize])
 
-  const filteredReviews = useMemo(() => {
-    const normalizedOrderQuery = orderQuery.trim().toLowerCase()
-    const normalizedPhoneQuery = phoneQuery.trim().toLowerCase()
-    const normalizedProductNameQuery = productNameQuery.trim().toLowerCase()
-    const fromTs = inputDateToTs(dateFrom, false)
-    const toTs = inputDateToTs(dateTo, true)
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      setLoading(true)
+      setMessage('')
+      try {
+        const params = new URLSearchParams({
+          page: String(currentPage),
+          page_size: String(pageSize),
+          status: statusFilter,
+        })
+        if (ratingFilters.length) params.set('ratings', ratingFilters.join(','))
+        if (productFilters.length) params.set('product_ids', productFilters.join(','))
+        if (dateFrom) params.set('date_from', dateFrom)
+        if (dateTo) params.set('date_to', dateTo)
+        if (debouncedOrderQuery) params.set('order_number', debouncedOrderQuery)
+        if (debouncedPhoneQuery) params.set('phone', debouncedPhoneQuery)
+        if (debouncedProductNameQuery) params.set('product_name', debouncedProductNameQuery)
 
-    return reviews.filter((review) => {
-      if (statusFilter === 'viewed' && !review.is_reviewed) return false
-      if (statusFilter === 'not_viewed' && review.is_reviewed) return false
-
-      if (ratingFilters.length > 0) {
-        const rating = Number(getRawReviewValue(review, 'rating'))
-        if (!Number.isFinite(rating) || !ratingFilters.includes(rating)) return false
+        const response = await authenticatedFetch(`/api/reviews/?${params}`)
+        if (response.status === 401) { clearTokens(); navigate('/login'); return }
+        const data = await response.json().catch(() => ({}))
+        if (!cancelled) {
+          if (!response.ok) {
+            setMessage(data.detail ?? 'Не удалось загрузить список')
+          } else {
+            setReviews(Array.isArray(data.results) ? data.results : [])
+            setTotal(data.total ?? 0)
+          }
+        }
+      } catch {
+        if (!cancelled) setMessage('Бэкенд недоступен')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-
-      if (productFilters.length > 0) {
-        const reviewProductId = String(review?.review_dict?.product?.id ?? '')
-        if (!productFilters.includes(reviewProductId)) return false
-      }
-
-      const reviewDateTs = dateToTs(getRawReviewValue(review, 'date'))
-      if (fromTs && (!reviewDateTs || reviewDateTs < fromTs)) return false
-      if (toTs && (!reviewDateTs || reviewDateTs > toTs)) return false
-
-      const orderNumber = String(review.order_number ?? '').toLowerCase()
-      if (normalizedOrderQuery && !orderNumber.includes(normalizedOrderQuery)) return false
-
-      const phone = String(getRawReviewValue(review, 'phone_number') ?? '').toLowerCase()
-      if (normalizedPhoneQuery && !phone.includes(normalizedPhoneQuery)) return false
-
-      const productName = String(review?.review_dict?.product?.name ?? '').toLowerCase()
-      if (normalizedProductNameQuery && !productName.includes(normalizedProductNameQuery)) return false
-
-      return true
-    })
-  }, [reviews, statusFilter, ratingFilters, productFilters, dateFrom, dateTo, orderQuery, phoneQuery, productNameQuery])
+    }
+    load()
+    return () => { cancelled = true }
+  }, [currentPage, pageSize, statusFilter, ratingFilters, productFilters, dateFrom, dateTo, debouncedOrderQuery, debouncedPhoneQuery, debouncedProductNameQuery, navigate, refreshKey])
 
   const ratingFilterLabel =
     ratingFilters.length === 0
       ? 'Все'
-      : [...ratingFilters]
-          .sort((a, b) => b - a)
-          .join(', ')
+      : [...ratingFilters].sort((a, b) => b - a).join(', ')
   const productFilterLabel =
     productFilters.length === 0
       ? 'Все'
-      : productFilters
-          .map((id) => products.find((item) => item.id === id)?.name || id)
-          .join(', ')
+      : productFilters.map((id) => selectedProductMeta[id] || id).join(', ')
 
-  const totalPages = Math.max(1, Math.ceil(filteredReviews.length / pageSize))
-  const paginatedReviews = useMemo(() => {
-    const start = (currentPage - 1) * pageSize
-    return filteredReviews.slice(start, start + pageSize)
-  }, [filteredReviews, currentPage, pageSize])
-
-  useEffect(() => {
-    setCurrentPage(1)
-  }, [statusFilter, ratingFilters, productFilters, dateFrom, dateTo, orderQuery, phoneQuery, productNameQuery, pageSize])
-
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages)
-  }, [currentPage, totalPages])
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   return (
     <main className="page">
       <header className="topbar">
-        <span className="navBrand">K</span>
         <div className="titleWrap">
           <p className="eyebrow">Kaspi Reviews</p>
           <h1>Список отзывов</h1>
-          <p className="sub">Нажмите на строку, чтобы открыть детали</p>
         </div>
-        <Link to="/analytics" className="linkBtn">Аналитика</Link>
-        <Link to="/product-analytics" className="linkBtn">По товарам</Link>
-        <button type="button" onClick={loadReviews} disabled={loading}>
+        <button type="button" onClick={() => setRefreshKey((k) => k + 1)} disabled={loading}>
           {loading ? 'Загрузка...' : 'Обновить'}
         </button>
-        <LogoutButton />
       </header>
 
       {message && <p className="banner">{message}</p>}
@@ -475,27 +512,15 @@ function ListPage() {
           </div>
           <div className="filterItem">
             <label htmlFor="ratingFilter">Оценка</label>
-            <details id="ratingFilter" className="ratingDropdown">
-              <summary>Выбрано: {ratingFilterLabel}</summary>
-              <div className="ratingFilters">
-                {[5, 4, 3, 2, 1].map((value) => (
-                  <label key={value} className="ratingCheck">
-                    <input
-                      type="checkbox"
-                      checked={ratingFilters.includes(value)}
-                      onChange={(event) => {
-                        if (event.target.checked) {
-                          setRatingFilters((prev) => [...prev, value])
-                        } else {
-                          setRatingFilters((prev) => prev.filter((item) => item !== value))
-                        }
-                      }}
-                    />
-                    <span>{value}</span>
-                  </label>
-                ))}
-              </div>
-            </details>
+            <CheckboxDropdown
+              id="ratingFilter"
+              label={`Выбрано: ${ratingFilterLabel}`}
+              items={[5, 4, 3, 2, 1].map((v) => ({ value: v, label: String(v) }))}
+              selected={ratingFilters}
+              onToggle={(value, checked) =>
+                setRatingFilters((prev) => checked ? [...prev, value] : prev.filter((v) => v !== value))
+              }
+            />
           </div>
           <div className="filterItem">
             <label htmlFor="dateFrom">Дата c</label>
@@ -507,46 +532,18 @@ function ListPage() {
           </div>
           <div className="filterItem">
             <label htmlFor="productFilter">Товары</label>
-            <details id="productFilter" className="ratingDropdown">
-              <summary>Выбрано: {productFilterLabel}</summary>
-              <input
-                className="productSearchInput"
-                type="text"
-                placeholder="Поиск по названию..."
-                value={productSearch}
-                onChange={(event) => setProductSearch(event.target.value)}
-                onClick={(event) => event.stopPropagation()}
-              />
-              <div className="ratingFilters productFilters">
-                {products
-                  .filter((product) =>
-                    (product.name || product.id).toLowerCase().includes(productSearch.toLowerCase())
-                  )
-                  .map((product) => (
-                    <label key={product.id} className="ratingCheck">
-                      <input
-                        type="checkbox"
-                        checked={productFilters.includes(product.id)}
-                        onChange={(event) => {
-                          if (event.target.checked) {
-                            setProductFilters((prev) => [...prev, product.id])
-                          } else {
-                            setProductFilters((prev) => prev.filter((item) => item !== product.id))
-                          }
-                        }}
-                      />
-                      <span>{product.name || product.id}</span>
-                    </label>
-                  ))}
-                {!products.length && <span className="sub">Нет данных</span>}
-                {products.length > 0 &&
-                  products.filter((p) =>
-                    (p.name || p.id).toLowerCase().includes(productSearch.toLowerCase())
-                  ).length === 0 && (
-                    <span className="sub">Ничего не найдено</span>
-                  )}
-              </div>
-            </details>
+            <CheckboxDropdown
+              id="productFilter"
+              label={`Выбрано: ${productFilterLabel}`}
+              items={[]}
+              selected={productFilters}
+              onToggle={(value, checked, label) => {
+                setProductFilters((prev) => checked ? [...prev, value] : prev.filter((v) => v !== value))
+                if (checked) setSelectedProductMeta((prev) => ({ ...prev, [value]: label }))
+              }}
+              searchable
+              fetchItems={fetchProducts}
+            />
           </div>
           <div className="filterItem filterItemSearch">
             <label htmlFor="productNameQuery">Поиск по товару</label>
@@ -612,7 +609,7 @@ function ListPage() {
               </tr>
             </thead>
             <tbody>
-              {paginatedReviews.map((review) => (
+              {reviews.map((review) => (
                 <tr key={review.order_number} className={!review.is_reviewed ? 'unreadRow' : ''}>
                   <td className={`mono ${!review.is_reviewed ? 'unreadText' : ''}`}>{review.order_number}</td>
                   <td>{review?.review_dict?.product?.name || 'Нет данных'}</td>
@@ -637,11 +634,11 @@ function ListPage() {
               ))}
             </tbody>
           </table>
-          {!filteredReviews.length && !loading && <p className="sub">Отзывы по фильтрам не найдены</p>}
+          {!reviews.length && !loading && <p className="sub">Отзывы по фильтрам не найдены</p>}
         </div>
         <div className="paginationBar">
           <div className="paginationInfo">
-            Показано: {paginatedReviews.length} из {filteredReviews.length}
+            Показано: {reviews.length} из {total}
           </div>
           <div className="paginationControls">
             <label htmlFor="pageSize" className="pageSizeLabel">
@@ -732,19 +729,11 @@ function DetailPage() {
   return (
     <main className="page">
       <header className="topbar">
-        <span className="navBrand">K</span>
         <div className="titleWrap">
           <p className="eyebrow">Kaspi Reviews</p>
           <h1>Детали отзыва</h1>
           <p className="sub mono">Заказ: {orderNumber}</p>
         </div>
-        <Link to="/analytics" className="linkBtn">
-          Аналитика
-        </Link>
-        <Link to="/" className="linkBtn">
-          Назад к списку
-        </Link>
-        <LogoutButton />
       </header>
 
       {message && <p className="banner">{message}</p>}
@@ -866,27 +855,30 @@ function DetailPage() {
 }
 
 function AnalyticsPage() {
-  const [products, setProducts] = useState([])
+  const [selectedProductMeta, setSelectedProductMeta] = useState({})
   const [chartData, setChartData] = useState([])
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
-  const [periodDays, setPeriodDays] = useState(30)
+  const [periodDays, setPeriodDays] = useState('all')
   const [groupBy, setGroupBy] = useState('day')
   const [productFilters, setProductFilters] = useState([])
   const [ratingFilters, setRatingFilters] = useState([])
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const navigate = useNavigate()
+  const chartRef = useRef(null)
 
-  useEffect(() => {
-    const loadProducts = async () => {
-      const res = await authenticatedFetch('/api/products/ids/')
-      if (res.status === 401) { clearTokens(); navigate('/login'); return }
-      const data = await res.json().catch(() => ({}))
-      if (res.ok) setProducts(Array.isArray(data.products) ? data.products : [])
-    }
-    loadProducts()
-  }, [navigate])
+  const fetchProducts = useCallback(async (search) => {
+    const params = new URLSearchParams()
+    if (search) params.set('search', search)
+    const res = await authenticatedFetch(`/api/products/ids/?${params}`)
+    if (!res.ok) return []
+    const data = await res.json().catch(() => ({}))
+    return (Array.isArray(data.products) ? data.products : []).map((p) => ({
+      value: p.id,
+      label: p.name || p.id,
+    }))
+  }, [])
 
   const loadChart = useCallback(async () => {
     setLoading(true)
@@ -912,10 +904,16 @@ function AnalyticsPage() {
 
   useEffect(() => { loadChart() }, [loadChart])
 
+  useEffect(() => {
+    if (chartData.length && chartRef.current) {
+      chartRef.current.scrollLeft = chartRef.current.scrollWidth
+    }
+  }, [chartData])
+
   const productFilterLabel =
     productFilters.length === 0
       ? 'Все'
-      : productFilters.map((id) => products.find((p) => p.id === id)?.name || id).join(', ')
+      : productFilters.map((id) => selectedProductMeta[id] || id).join(', ')
 
   const ratingFilterLabel =
     ratingFilters.length === 0 ? 'Все' : [...ratingFilters].sort((a, b) => b - a).join(', ')
@@ -926,18 +924,13 @@ function AnalyticsPage() {
   return (
     <main className="page">
       <header className="topbar">
-        <span className="navBrand">K</span>
         <div className="titleWrap">
           <p className="eyebrow">Kaspi Reviews</p>
           <h1>Аналитика</h1>
-          <p className="sub">Отзывы по дням</p>
         </div>
         <button type="button" onClick={loadChart} disabled={loading}>
           {loading ? 'Загрузка...' : 'Обновить'}
         </button>
-        <Link to="/product-analytics" className="linkBtn">По товарам</Link>
-        <Link to="/" className="linkBtn">Список</Link>
-        <LogoutButton />
       </header>
 
       {message && <p className="banner">{message}</p>}
@@ -971,43 +964,30 @@ function AnalyticsPage() {
           </div>
           <div className="filterItem">
             <label htmlFor="analyticsRatingFilter">Оценка</label>
-            <details id="analyticsRatingFilter" className="ratingDropdown">
-              <summary>Выбрано: {ratingFilterLabel}</summary>
-              <div className="ratingFilters">
-                {[5, 4, 3, 2, 1].map((value) => (
-                  <label key={value} className="ratingCheck">
-                    <input
-                      type="checkbox"
-                      checked={ratingFilters.includes(value)}
-                      onChange={(e) => setRatingFilters((prev) =>
-                        e.target.checked ? [...prev, value] : prev.filter((v) => v !== value)
-                      )}
-                    />
-                    <span>{value}</span>
-                  </label>
-                ))}
-              </div>
-            </details>
+            <CheckboxDropdown
+              id="analyticsRatingFilter"
+              label={`Выбрано: ${ratingFilterLabel}`}
+              items={[5, 4, 3, 2, 1].map((v) => ({ value: v, label: String(v) }))}
+              selected={ratingFilters}
+              onToggle={(value, checked) =>
+                setRatingFilters((prev) => checked ? [...prev, value] : prev.filter((v) => v !== value))
+              }
+            />
           </div>
           <div className="filterItem">
             <label htmlFor="analyticsProductFilter">Товары</label>
-            <details id="analyticsProductFilter" className="ratingDropdown">
-              <summary>Выбрано: {productFilterLabel}</summary>
-              <div className="ratingFilters productFilters">
-                {products.map((product) => (
-                  <label key={product.id} className="ratingCheck">
-                    <input
-                      type="checkbox"
-                      checked={productFilters.includes(product.id)}
-                      onChange={(e) => setProductFilters((prev) =>
-                        e.target.checked ? [...prev, product.id] : prev.filter((v) => v !== product.id)
-                      )}
-                    />
-                    <span>{product.name || product.id}</span>
-                  </label>
-                ))}
-              </div>
-            </details>
+            <CheckboxDropdown
+              id="analyticsProductFilter"
+              label={`Выбрано: ${productFilterLabel}`}
+              items={[]}
+              selected={productFilters}
+              onToggle={(value, checked, label) => {
+                setProductFilters((prev) => checked ? [...prev, value] : prev.filter((v) => v !== value))
+                if (checked) setSelectedProductMeta((prev) => ({ ...prev, [value]: label }))
+              }}
+              searchable
+              fetchItems={fetchProducts}
+            />
           </div>
           <div className="filterItem">
             <label htmlFor="analyticsDateFrom">Дата c</label>
@@ -1044,7 +1024,7 @@ function AnalyticsPage() {
         {loading && <p className="sub">Загрузка...</p>}
         {!loading && !chartData.length && <p className="sub">Недостаточно данных для графика</p>}
         {!loading && chartData.length > 0 && (
-          <div className="analyticsChart">
+          <div className="analyticsChart" ref={chartRef}>
             {chartData.map((item) => (
               <div key={item.key} className="chartCol">
                 <div className="chartBarOuter" title={`${item.label} • Всего: ${item.total}`}>
@@ -1158,14 +1138,14 @@ function ProductAnalyticsPage() {
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
-  const [periodDays, setPeriodDays] = useState(30)
+  const [periodDays, setPeriodDays] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [ratingOp, setRatingOp] = useState('lt')
-  const [ratingThreshold, setRatingThreshold] = useState('4.5')
+  const [ratingThreshold, setRatingThreshold] = useState('5')
   const [minReviews, setMinReviews] = useState(1)
-  const [sortBy, setSortBy] = useState('avg')
-  const [sortDir, setSortDir] = useState('asc')
+  const [sortBy, setSortBy] = useState('count')
+  const [sortDir, setSortDir] = useState('desc')
   const navigate = useNavigate()
 
   const load = useCallback(async () => {
@@ -1217,18 +1197,13 @@ function ProductAnalyticsPage() {
   return (
     <main className="page">
       <header className="topbar">
-        <span className="navBrand">K</span>
         <div className="titleWrap">
           <p className="eyebrow">Kaspi Reviews</p>
           <h1>Аналитика по товарам</h1>
-          <p className="sub">Средний рейтинг товаров за период</p>
         </div>
         <button type="button" onClick={load} disabled={loading}>
           {loading ? 'Загрузка...' : 'Обновить'}
         </button>
-        <Link to="/analytics" className="linkBtn">График</Link>
-        <Link to="/" className="linkBtn">Список</Link>
-        <LogoutButton />
       </header>
 
       {message && <p className="banner">{message}</p>}
@@ -1347,7 +1322,7 @@ function ProductAnalyticsPage() {
               </thead>
               <tbody>
                 {rawProducts.map((item) => (
-                  <tr key={item.id}>
+                  <tr key={item.id} className="clickableRow" onClick={() => navigate(`/product-analytics/${encodeURIComponent(item.id)}`)}>
                     <td className="productNameCell">{item.name}</td>
                     <td className="mono">{item.count}</td>
                     <td>
@@ -1393,9 +1368,471 @@ function ProductAnalyticsPage() {
   )
 }
 
+function ProductDetailPage() {
+  const { productId } = useParams()
+  const navigate = useNavigate()
+  const [groupBy, setGroupBy] = useState('day')
+  const [periodDays, setPeriodDays] = useState('all')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [chartData, setChartData] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const params = new URLSearchParams({ group_by: groupBy, period_days: periodDays })
+        if (dateFrom) params.set('date_from', dateFrom)
+        if (dateTo) params.set('date_to', dateTo)
+        const res = await authenticatedFetch(`/api/analytics/products/${encodeURIComponent(productId)}/detail/?${params}`)
+        if (res.status === 401) { clearTokens(); navigate('/login'); return }
+        const data = await res.json().catch(() => [])
+        if (!cancelled) setChartData(Array.isArray(data) ? data : [])
+      } catch {
+        if (!cancelled) setError('Бэкенд недоступен')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [productId, groupBy, periodDays, dateFrom, dateTo, navigate])
+
+  const n = chartData.length
+  const totalReviews = chartData.reduce((s, d) => s + d.count, 0)
+  const overallAvg = totalReviews > 0
+    ? chartData.reduce((s, d) => s + d.avg * d.count, 0) / totalReviews
+    : null
+  const best = n > 0 ? chartData.reduce((b, d) => d.avg > b.avg ? d : b) : null
+  const worst = n > 0 ? chartData.reduce((b, d) => d.avg < b.avg ? d : b) : null
+
+  const seg = Math.max(1, Math.round(n * 0.3))
+  const sliceAvg = (arr) => {
+    const tot = arr.reduce((s, d) => s + d.count, 0)
+    return tot > 0 ? arr.reduce((s, d) => s + d.avg * d.count, 0) / tot : null
+  }
+  const trend = n >= 4
+    ? sliceAvg(chartData.slice(-seg)) - sliceAvg(chartData.slice(0, seg))
+    : null
+  const trendUp = trend !== null && trend > 0.01
+  const trendDown = trend !== null && trend < -0.01
+
+  const W = 920, H = 256
+  const padL = 56, padR = 28, padT = 16, padB = 64
+  const innerW = W - padL - padR
+  const innerH = H - padT - padB
+
+  const toX = (i) => padL + (n > 1 ? (i / (n - 1)) * innerW : innerW / 2)
+  const toY = (v) => padT + innerH - ((Math.min(5, Math.max(1, v)) - 1) / 4) * innerH
+
+  const areaPath = n === 0 ? '' : [
+    `M ${toX(0)} ${padT + innerH}`,
+    `L ${toX(0)} ${toY(chartData[0].avg)}`,
+    ...chartData.slice(1).map((d, i) => `L ${toX(i + 1)} ${toY(d.avg)}`),
+    `L ${toX(n - 1)} ${padT + innerH} Z`,
+  ].join(' ')
+
+  const linePath = n === 0 ? '' : [
+    `M ${toX(0)} ${toY(chartData[0].avg)}`,
+    ...chartData.slice(1).map((d, i) => `L ${toX(i + 1)} ${toY(d.avg)}`),
+  ].join(' ')
+
+  const dotColor = (avg) => {
+    if (avg >= 4.5) return '#34D399'
+    if (avg >= 3.5) return '#60A5FA'
+    if (avg >= 2.5) return '#FBBF24'
+    if (avg >= 1.5) return '#FB923C'
+    return '#F87171'
+  }
+
+  const ratingClass = (avg) => {
+    if (avg >= 4.5) return 'rating5'
+    if (avg >= 3.5) return 'rating4'
+    if (avg >= 2.5) return 'rating3'
+    if (avg >= 1.5) return 'rating2'
+    return 'rating1'
+  }
+
+  const fmtAvg = (v) => v != null ? Number(v).toFixed(2) : '—'
+  const labelStep = n > 28 ? Math.ceil(n / 14) : n > 14 ? 2 : 1
+  const maxCount = Math.max(1, ...chartData.map((d) => d.count))
+
+  const kpis = [
+    {
+      label: 'Всего отзывов',
+      value: totalReviews.toLocaleString('ru-RU'),
+      sub: `${n} ${n === 1 ? 'период' : n < 5 ? 'периода' : 'периодов'}`,
+      color: null,
+      icon: (
+        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+          <path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm0 3v5l3 3-1.4 1.4L8 11.4V5h2z" fill="currentColor" opacity=".5"/>
+        </svg>
+      ),
+    },
+    {
+      label: 'Средний рейтинг',
+      value: `★ ${fmtAvg(overallAvg)}`,
+      sub: 'взвешенное среднее',
+      color: overallAvg != null ? dotColor(overallAvg) : null,
+      icon: (
+        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+          <path d="M10 2l2.4 4.9 5.4.8-3.9 3.8.9 5.3L10 14.3l-4.8 2.5.9-5.3L2.2 7.7l5.4-.8L10 2z" fill="currentColor" opacity=".5"/>
+        </svg>
+      ),
+    },
+    {
+      label: 'Тренд периода',
+      value: trend === null
+        ? '—'
+        : `${trendUp ? '↑ +' : trendDown ? '↓ −' : '→ '}${Math.abs(trend).toFixed(2)}`,
+      sub: 'первые vs последние 30%',
+      color: trendUp ? '#34D399' : trendDown ? '#F87171' : 'var(--t-2)',
+      icon: (
+        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+          <path d="M2 14l5-5 4 4 7-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity=".5"/>
+        </svg>
+      ),
+    },
+    {
+      label: 'Лучший период',
+      value: `★ ${fmtAvg(best?.avg)}`,
+      sub: best?.label ?? '—',
+      color: '#34D399',
+      icon: (
+        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+          <path d="M10 3l1.8 3.6 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4L4.2 7.2l4-.6L10 3z" fill="#34D399" opacity=".6"/>
+        </svg>
+      ),
+    },
+    {
+      label: 'Худший период',
+      value: `★ ${fmtAvg(worst?.avg)}`,
+      sub: worst?.label ?? '—',
+      color: '#F87171',
+      icon: (
+        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+          <path d="M10 17l-1.8-3.6-4-.6 2.9-2.8-.7-4 3.6 1.9 3.6-1.9-.7 4 2.9 2.8-4 .6L10 17z" fill="#F87171" opacity=".6"/>
+        </svg>
+      ),
+    },
+  ]
+
+  return (
+    <main className="page">
+      {/* ── Header ── */}
+      <header className="topbar pbiTopbar">
+        <div className="titleWrap">
+          <button type="button" className="pbiBackBtn" onClick={() => navigate('/product-analytics')}>
+            <svg viewBox="0 0 16 16" fill="none" width="14" height="14">
+              <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Аналитика по товарам
+          </button>
+          <h1 className="pbiPageTitle">Детальная аналитика</h1>
+          <p className="sub mono pbiProductId">{decodeURIComponent(productId)}</p>
+        </div>
+        <div className="pbiHeaderBadge">
+          <span className="pbiHeaderBadgeLabel">Product Analytics</span>
+        </div>
+      </header>
+
+      {/* ── Control bar ── */}
+      <div className="pbiControlBar">
+        <div className="filterGroup">
+          <span className="filterLabel">Период</span>
+          <Select
+            value={periodDays}
+            onChange={(e) => setPeriodDays(e.target.value)}
+            options={[
+              { value: '30', label: '30 дней' },
+              { value: '90', label: '90 дней' },
+              { value: '180', label: '180 дней' },
+              { value: '365', label: '1 год' },
+              { value: 'all', label: 'Всё время' },
+            ]}
+          />
+        </div>
+        <div className="filterGroup">
+          <span className="filterLabel">Группировка</span>
+          <div className="segmentedControl">
+            {[['day', 'День'], ['week', 'Неделя'], ['month', 'Месяц']].map(([g, lbl]) => (
+              <button key={g} type="button" className={`segmentBtn${groupBy === g ? ' active' : ''}`} onClick={() => setGroupBy(g)}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="filterGroup">
+          <span className="filterLabel">Дата с</span>
+          <DateInput value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} placeholder="от" />
+        </div>
+        <div className="filterGroup">
+          <span className="filterLabel">Дата по</span>
+          <DateInput value={dateTo} onChange={(e) => setDateTo(e.target.value)} placeholder="до" />
+        </div>
+        {(dateFrom || dateTo) && (
+          <button type="button" className="pbiResetBtn" onClick={() => { setDateFrom(''); setDateTo('') }}>
+            Сбросить даты
+          </button>
+        )}
+      </div>
+
+      {error && <p className="banner">{error}</p>}
+
+      {/* ── Loading ── */}
+      {loading && (
+        <div className="pbiStateBox">
+          <div className="pbiSpinner" />
+          <span className="sub">Загрузка данных...</span>
+        </div>
+      )}
+
+      {/* ── Empty ── */}
+      {!loading && !error && n === 0 && (
+        <div className="pbiStateBox">
+          <svg viewBox="0 0 64 48" width="56" height="42" fill="none" aria-hidden="true">
+            <rect x="4" y="32" width="12" height="12" rx="2" fill="var(--t-3)"/>
+            <rect x="26" y="20" width="12" height="24" rx="2" fill="var(--t-3)"/>
+            <rect x="48" y="8" width="12" height="36" rx="2" fill="var(--t-3)"/>
+          </svg>
+          <p className="sub">Нет данных за выбранный период</p>
+        </div>
+      )}
+
+      {/* ── Main content ── */}
+      {!loading && n > 0 && (
+        <>
+          {/* KPI cards */}
+          <div className="pbiKpiRow">
+            {kpis.map(({ label, value, sub, color, icon }) => (
+              <div key={label} className="pbiKpiCard">
+                <div className="pbiKpiTop">
+                  <span className="pbiKpiLabel">{label}</span>
+                  <span className="pbiKpiIcon">{icon}</span>
+                </div>
+                <span className="pbiKpiValue" style={color ? { color } : undefined}>{value}</span>
+                <span className="pbiKpiSub">{sub}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Main area/line chart */}
+          <section className="panel pbiChartPanel">
+            <div className="pbiChartHead">
+              <div>
+                <h2 className="pbiChartTitle">Динамика среднего рейтинга</h2>
+                <p className="pbiChartSub">
+                  Среднее значение оценок по {groupBy === 'day' ? 'дням' : groupBy === 'week' ? 'неделям' : 'месяцам'} · {n} точек данных
+                </p>
+              </div>
+              <div className="pbiLegend">
+                {[['#34D399', '≥4.5'], ['#60A5FA', '3.5–4.5'], ['#FBBF24', '2.5–3.5'], ['#FB923C', '1.5–2.5'], ['#F87171', '<1.5']].map(([color, lbl]) => (
+                  <span key={lbl} className="pbiLegendItem">
+                    <span className="pbiLegendDot" style={{ background: color }}/>
+                    {lbl}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="pbiSvgContainer">
+              <svg viewBox={`0 0 ${W} ${H}`} className="pbiSvg" preserveAspectRatio="xMidYMid meet">
+                <defs>
+                  <linearGradient id="pbiAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#60A5FA" stopOpacity="0.28"/>
+                    <stop offset="70%" stopColor="#60A5FA" stopOpacity="0.06"/>
+                    <stop offset="100%" stopColor="#60A5FA" stopOpacity="0"/>
+                  </linearGradient>
+                  <clipPath id="pbiClip">
+                    <rect x={padL} y={padT} width={innerW} height={innerH}/>
+                  </clipPath>
+                </defs>
+
+                {/* Rating zone background bands */}
+                {[[4, 5, 'rgba(52,211,153,0.045)'], [3, 4, 'rgba(96,165,250,0.035)'], [2, 3, 'rgba(251,191,36,0.035)'], [1, 2, 'rgba(248,113,113,0.05)']].map(([y1, y2, fill]) => (
+                  <rect key={y1} x={padL} y={toY(y2)} width={innerW} height={toY(y1) - toY(y2)} fill={fill}/>
+                ))}
+
+                {/* Horizontal grid lines */}
+                {[1, 2, 3, 4, 5].map((tick) => (
+                  <g key={tick}>
+                    <line x1={padL} y1={toY(tick)} x2={W - padR} y2={toY(tick)} stroke="rgba(255,255,255,0.06)" strokeWidth="1"/>
+                    <text x={padL - 7} y={toY(tick)} textAnchor="end" dominantBaseline="middle" className="pbiAxisLabel">{tick}★</text>
+                  </g>
+                ))}
+
+                {/* Reference line at 4.0 */}
+                <line x1={padL} y1={toY(4)} x2={W - padR} y2={toY(4)} stroke="rgba(52,211,153,0.4)" strokeWidth="1" strokeDasharray="5,3"/>
+                <text x={W - padR + 4} y={toY(4)} dominantBaseline="middle" className="pbiRefLabel">4.0</text>
+
+                {/* Area fill */}
+                <path d={areaPath} fill="url(#pbiAreaGrad)" clipPath="url(#pbiClip)"/>
+
+                {/* Line */}
+                <path d={linePath} fill="none" stroke="#60A5FA" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" clipPath="url(#pbiClip)"/>
+
+                {/* Dots + x-axis labels */}
+                {chartData.map((d, i) => (
+                  <g key={d.key}>
+                    <circle cx={toX(i)} cy={toY(d.avg)} r="4.5" fill={dotColor(d.avg)} stroke="var(--bg-1)" strokeWidth="2.5">
+                      <title>{d.label}: ★ {Number(d.avg).toFixed(2)} · {d.count} отзывов</title>
+                    </circle>
+                    {i % labelStep === 0 && (
+                      <text
+                        x={toX(i)} y={padT + innerH + 10}
+                        textAnchor="end" dominantBaseline="auto"
+                        className="pbiAxisLabel"
+                        transform={`rotate(-42, ${toX(i)}, ${padT + innerH + 10})`}
+                      >
+                        {d.label}
+                      </text>
+                    )}
+                  </g>
+                ))}
+              </svg>
+            </div>
+
+            {/* Chart footer stats */}
+            <div className="pbiChartFooter">
+              <div className="pbiChartStat">
+                <span className="pbiChartStatLabel">Мин</span>
+                <span className="pbiChartStatVal" style={{ color: '#F87171' }}>★ {fmtAvg(worst?.avg)}</span>
+              </div>
+              <div className="pbiChartStatDivider"/>
+              <div className="pbiChartStat">
+                <span className="pbiChartStatLabel">Среднее</span>
+                <span className="pbiChartStatVal" style={{ color: overallAvg != null ? dotColor(overallAvg) : 'var(--t-2)' }}>★ {fmtAvg(overallAvg)}</span>
+              </div>
+              <div className="pbiChartStatDivider"/>
+              <div className="pbiChartStat">
+                <span className="pbiChartStatLabel">Макс</span>
+                <span className="pbiChartStatVal" style={{ color: '#34D399' }}>★ {fmtAvg(best?.avg)}</span>
+              </div>
+              <div className="pbiChartStatDivider"/>
+              <div className="pbiChartStat">
+                <span className="pbiChartStatLabel">Всего отзывов</span>
+                <span className="pbiChartStatVal">{totalReviews.toLocaleString('ru-RU')}</span>
+              </div>
+            </div>
+          </section>
+
+          {/* Bottom split row */}
+          <div className="pbiSplitRow">
+
+            {/* Count bar chart */}
+            <section className="panel pbiChartPanel">
+              <div className="pbiChartHead">
+                <div>
+                  <h2 className="pbiChartTitle">Объём отзывов</h2>
+                  <p className="pbiChartSub">Количество по периодам</p>
+                </div>
+              </div>
+              <div className="pbiCountBars">
+                {chartData.map((d, i) => (
+                  <div key={d.key} className="pbiCountBarRow" title={`${d.label}: ${d.count} отзывов · ★ ${Number(d.avg).toFixed(2)}`}>
+                    <span className="pbiCountBarLabel">{i % labelStep === 0 ? d.label : ''}</span>
+                    <div className="pbiCountBarTrack">
+                      <div className="pbiCountBarFill" style={{ width: `${(d.count / maxCount) * 100}%`, background: dotColor(d.avg) }}/>
+                    </div>
+                    <span className="pbiCountBarVal">{d.count}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Data table */}
+            <section className="panel pbiChartPanel">
+              <div className="pbiChartHead">
+                <div>
+                  <h2 className="pbiChartTitle">Сводная таблица</h2>
+                  <p className="pbiChartSub">{n} {n === 1 ? 'запись' : n < 5 ? 'записи' : 'записей'}</p>
+                </div>
+              </div>
+              <div className="tableWrap pbiScrollTable">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Период</th>
+                      <th>Отзывов</th>
+                      <th>Рейтинг</th>
+                      <th>Шкала</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chartData.map((d) => (
+                      <tr key={d.key}>
+                        <td className="mono">{d.label}</td>
+                        <td className="mono">{d.count}</td>
+                        <td>
+                          <span className={`ratingBadge ${ratingClass(d.avg)}`}>
+                            ★ {Number(d.avg).toFixed(2)}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="pbiInlineBar">
+                            <div className="pbiInlineBarFill" style={{ width: `${((d.avg - 1) / 4) * 100}%`, background: dotColor(d.avg) }}/>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+          </div>
+        </>
+      )}
+    </main>
+  )
+}
+
+const NAV_ITEMS = [
+  { path: '/', label: 'Отзывы' },
+  { path: '/analytics', label: 'График' },
+  { path: '/product-analytics', label: 'По товарам' },
+]
+
+function Sidebar() {
+  const { pathname } = useLocation()
+  const isActive = (path) =>
+    path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(path + '/')
+
+  return (
+    <aside className="sidebar">
+      <div className="sidebarBrand">
+        <span className="sidebarLogo">K</span>
+        <div>
+          <p className="sidebarBrandName">Kaspi</p>
+          <p className="sidebarBrandSub">Reviews</p>
+        </div>
+      </div>
+      <nav className="sidebarNav">
+        {NAV_ITEMS.map(({ path, label }) => (
+          <Link key={path} to={path} className={`sidebarNavItem${isActive(path) ? ' active' : ''}`}>
+            {label}
+          </Link>
+        ))}
+      </nav>
+      <div className="sidebarFooter">
+        <LogoutButton />
+      </div>
+    </aside>
+  )
+}
+
 function RequireAuth({ children }) {
   if (!getAccessToken()) return <Navigate to="/login" replace />
-  return children
+  return (
+    <div className="appShell">
+      <Sidebar />
+      <div className="mainContent">{children}</div>
+    </div>
+  )
 }
 
 export default function App() {
@@ -1407,6 +1844,14 @@ export default function App() {
         element={
           <RequireAuth>
             <ProductAnalyticsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/product-analytics/:productId"
+        element={
+          <RequireAuth>
+            <ProductDetailPage />
           </RequireAuth>
         }
       />

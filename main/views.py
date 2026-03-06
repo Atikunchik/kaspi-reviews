@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -46,9 +47,118 @@ class ReviewListCreateView(APIView):
         if not merchant_id and not request.user.is_superuser:
             return Response({"detail": "merchant_id is not configured for this user."}, status=403)
 
-        query = {} if request.user.is_superuser else {"review_dict.merchant.code": merchant_id}
-        reviews = [_serialize_document(doc) for doc in collection.find(query).sort("_id", 1)]
-        return Response(reviews)
+        status_filter = request.query_params.get("status", "all")
+        ratings_str = request.query_params.get("ratings", "")
+        product_ids_str = request.query_params.get("product_ids", "")
+        date_from_str = request.query_params.get("date_from", "")
+        date_to_str = request.query_params.get("date_to", "")
+        order_query = request.query_params.get("order_number", "").strip()
+        phone_query = request.query_params.get("phone", "").strip()
+        product_name_query = request.query_params.get("product_name", "").strip()
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+        except (ValueError, TypeError):
+            page = 1
+        try:
+            page_size = max(1, min(500, int(request.query_params.get("page_size", 20))))
+        except (ValueError, TypeError):
+            page_size = 20
+
+        base_match = {} if request.user.is_superuser else {"review_dict.merchant.code": merchant_id}
+
+        if status_filter == "viewed":
+            base_match["is_reviewed"] = True
+        elif status_filter == "not_viewed":
+            base_match["is_reviewed"] = False
+
+        if product_ids_str:
+            product_ids = [p.strip() for p in product_ids_str.split(",") if p.strip()]
+            int_ids = [int(p) for p in product_ids if p.isdigit()]
+            base_match["review_dict.product.id"] = {"$in": product_ids + int_ids}
+
+        if order_query:
+            base_match["_id"] = {"$regex": re.escape(order_query), "$options": "i"}
+
+        if phone_query:
+            phone_regex = {"$regex": re.escape(phone_query), "$options": "i"}
+            base_match["$or"] = [
+                {"review_dict.phone_number": phone_regex},
+                {"review_dict.customer.phone_number": phone_regex},
+            ]
+
+        if product_name_query:
+            base_match["review_dict.product.name"] = {"$regex": re.escape(product_name_query), "$options": "i"}
+
+        rating_ints = [
+            int(r) for r in ratings_str.split(",")
+            if r.strip().isdigit() and 1 <= int(r.strip()) <= 5
+        ] if ratings_str else []
+
+        pipeline = [{"$match": base_match}]
+        pipeline.append({
+            "$addFields": {
+                "parsed_date": {
+                    "$dateFromString": {
+                        "dateString": "$review_dict.date",
+                        "format": "%d.%m.%Y",
+                        "onError": None,
+                        "onNull": None,
+                    }
+                },
+                "rating_int": {
+                    "$convert": {
+                        "input": "$review_dict.rating",
+                        "to": "int",
+                        "onError": None,
+                        "onNull": None,
+                    }
+                },
+            }
+        })
+
+        second_match = {}
+        if rating_ints:
+            second_match["rating_int"] = {"$in": rating_ints}
+
+        date_cond = {}
+        if date_from_str:
+            try:
+                date_cond["$gte"] = datetime.strptime(date_from_str, "%Y-%m-%d")
+            except ValueError:
+                pass
+        if date_to_str:
+            try:
+                date_cond["$lte"] = datetime.strptime(date_to_str, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59
+                )
+            except ValueError:
+                pass
+        if date_cond:
+            second_match["parsed_date"] = date_cond
+
+        if second_match:
+            pipeline.append({"$match": second_match})
+
+        pipeline.append({"$sort": {"parsed_date": -1}})
+
+        skip = (page - 1) * page_size
+        pipeline.append({
+            "$facet": {
+                "total": [{"$count": "count"}],
+                "data": [{"$skip": skip}, {"$limit": page_size}],
+            }
+        })
+
+        facet_result = list(collection.aggregate(pipeline))
+        facet = facet_result[0] if facet_result else {"total": [], "data": []}
+        total = facet["total"][0]["count"] if facet["total"] else 0
+
+        return Response({
+            "results": [_serialize_document(doc) for doc in facet["data"]],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        })
 
     @extend_schema(
         operation_id="reviews_create",
@@ -425,6 +535,69 @@ class AnalyticsProductsView(APIView):
         })
 
 
+class AnalyticsProductDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, product_id: str):
+        merchant_id = _get_user_merchant_id(request.user)
+        if not merchant_id and not request.user.is_superuser:
+            return Response({"detail": "merchant_id is not configured for this user."}, status=403)
+
+        period_days = request.query_params.get("period_days", "all")
+        group_by = request.query_params.get("group_by", "day")
+        date_from_str = request.query_params.get("date_from", "")
+        date_to_str = request.query_params.get("date_to", "")
+
+        base_match = {} if request.user.is_superuser else {"review_dict.merchant.code": merchant_id}
+        product_ids_filter = [product_id]
+        try:
+            product_ids_filter.append(int(product_id))
+        except (ValueError, TypeError):
+            pass
+        base_match["review_dict.product.id"] = {"$in": product_ids_filter}
+
+        pipeline = _build_analytics_pipeline(base_match, period_days, date_from_str, date_to_str)
+        pipeline.append({"$project": {"parsed_date": 1, "rating_int": 1}})
+
+        docs = list(collection.aggregate(pipeline))
+
+        buckets = {}
+        for doc in docs:
+            dt = doc.get("parsed_date")
+            rating = doc.get("rating_int")
+            if not dt or not rating:
+                continue
+            if group_by == "month":
+                bucket_dt = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                label = f"{bucket_dt.month:02d}.{bucket_dt.year}"
+                key = f"m-{int(bucket_dt.timestamp())}"
+                ts = int(bucket_dt.timestamp())
+            elif group_by == "week":
+                week_start = (dt - timedelta(days=dt.weekday())).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                label = f"Нед. {week_start.day:02d}.{week_start.month:02d}.{week_start.year}"
+                key = f"w-{int(week_start.timestamp())}"
+                ts = int(week_start.timestamp())
+            else:
+                bucket_dt = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                label = f"{bucket_dt.day:02d}.{bucket_dt.month:02d}.{bucket_dt.year}"
+                key = f"d-{int(bucket_dt.timestamp())}"
+                ts = int(bucket_dt.timestamp())
+
+            if key not in buckets:
+                buckets[key] = {"key": key, "label": label, "ts": ts, "sum": 0, "count": 0}
+            buckets[key]["sum"] += rating
+            buckets[key]["count"] += 1
+
+        result = sorted(buckets.values(), key=lambda x: x["ts"])
+        return Response([
+            {"key": b["key"], "label": b["label"], "ts": b["ts"],
+             "avg": round(b["sum"] / b["count"], 4), "count": b["count"]}
+            for b in result
+        ])
+
+
 class ProductIdListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -437,7 +610,10 @@ class ProductIdListView(APIView):
         if not merchant_id and not request.user.is_superuser:
             return Response({"detail": "merchant_id is not configured for this user."}, status=403)
 
+        search = request.query_params.get("search", "").strip()
         query = {} if request.user.is_superuser else {"merchant_code": merchant_id}
+        if search:
+            query["name"] = {"$regex": re.escape(search), "$options": "i"}
         products = [
             {"id": doc.get("product_id", ""), "name": doc.get("name", "")}
             for doc in product_ids_collection.find(query).sort("product_id", 1)
@@ -468,5 +644,4 @@ class ProductIdListView(APIView):
                     upsert=True,
                 )
                 products.append({"id": product_id, "name": name})
-
         return Response({"products": products})
