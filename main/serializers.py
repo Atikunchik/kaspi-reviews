@@ -41,8 +41,6 @@ class ReviewDictSerializer(serializers.Serializer):
     feedback = ReviewFeedbackSerializer()
     product = ReviewProductSerializer()
     merchant = ReviewMerchantSerializer()
-    edited_by_customer = serializers.BooleanField(source='editedByCustomer')
-    locale = serializers.CharField(allow_null=True, required=False)
 
 
 class ReviewListRetrieveSerializer(serializers.Serializer):

@@ -787,8 +787,6 @@ function DetailPage() {
                     {getRatingMeta(data.rating).text}
                   </span>
                 </dd>
-                <dt>Локаль</dt>
-                <dd>{display(data.locale)}</dd>
               </dl>
             </article>
             <article className="detailCard detailCardWide">
@@ -809,8 +807,6 @@ function DetailPage() {
                 <dd>{display(feedback.positive)}</dd>
                 <dt>Голосовал</dt>
                 <dd>{display(feedback.voted)}</dd>
-                <dt>Изменен клиентом</dt>
-                <dd>{display(data.editedByCustomer)}</dd>
               </dl>
             </article>
             <article className="detailCard detailCardWide">
