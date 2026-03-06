@@ -32,6 +32,7 @@
 - Never commit `.env` — reference `.env.example` for required keys
 - Never manually commit `frontend/dist/` — it is build output
 - Keep `requirements.txt` updated after `pip install`
+- All Python variables, function names, and class attributes must use `snake_case` — use `source=` on DRF serializer fields when the external data key is camelCase
 
 ## Git Conventions
 - Branches: `feat/short-name` · `fix/short-name` · `chore/short-name`

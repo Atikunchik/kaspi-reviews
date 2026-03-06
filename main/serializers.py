@@ -21,8 +21,8 @@ class ReviewFeedbackSerializer(serializers.Serializer):
 class ReviewProductSerializer(serializers.Serializer):
     id = serializers.CharField()
     name = serializers.CharField()
-    categoryCode = serializers.CharField()
-    categoryName = serializers.CharField()
+    category_code = serializers.CharField(source='categoryCode')
+    category_name = serializers.CharField(source='categoryName')
     link = serializers.URLField()
 
 
@@ -35,14 +35,14 @@ class ReviewDictSerializer(serializers.Serializer):
     id = serializers.CharField()
     author = serializers.CharField()
     date = serializers.CharField()
-    orderNumber = serializers.CharField()
+    order_number = serializers.CharField(source='orderNumber')
     rating = serializers.IntegerField()
     comment = ReviewCommentSerializer()
     feedback = ReviewFeedbackSerializer()
     product = ReviewProductSerializer()
     merchant = ReviewMerchantSerializer()
     editable = serializers.BooleanField()
-    editedByCustomer = serializers.BooleanField()
+    edited_by_customer = serializers.BooleanField(source='editedByCustomer')
     locale = serializers.CharField(allow_null=True, required=False)
 
 
