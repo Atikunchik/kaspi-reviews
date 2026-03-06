@@ -2145,22 +2145,20 @@ pre {
   border-radius: var(--r-full);
 }
 
-/* Review comment cell in product detail list */
-.reviewCommentCell {
-  max-width: 320px;
-  min-width: 160px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+/* Review comment row in product detail list */
+.reviewCommentRow td {
+  padding: 0 !important;
+  border-top: none !important;
 }
-.reviewCommentCell p {
-  margin: 0;
-  font-size: 0.82rem;
-  line-height: 1.4;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+.reviewCommentBlock {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  padding: 6px 14px 10px 14px;
+  background: rgba(255,255,255,0.02);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 .reviewCommentPlus  { color: var(--green-text); }
 .reviewCommentMinus { color: var(--red-text); }
