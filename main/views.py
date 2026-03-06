@@ -48,7 +48,6 @@ class ReviewListCreateView(APIView):
             return Response({"detail": "merchant_id is not configured for this user."}, status=403)
 
         status_filter = request.query_params.get("status", "all")
-        editable_filter = request.query_params.get("editable", "all")
         ratings_str = request.query_params.get("ratings", "")
         product_ids_str = request.query_params.get("product_ids", "")
         date_from_str = request.query_params.get("date_from", "")
@@ -71,11 +70,6 @@ class ReviewListCreateView(APIView):
             base_match["is_reviewed"] = True
         elif status_filter == "not_viewed":
             base_match["is_reviewed"] = False
-
-        if editable_filter == "true":
-            base_match["review_dict.editable"] = True
-        elif editable_filter == "false":
-            base_match["review_dict.editable"] = False
 
         if product_ids_str:
             product_ids = [p.strip() for p in product_ids_str.split(",") if p.strip()]
