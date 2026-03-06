@@ -1388,6 +1388,11 @@ function ProductDetailPage() {
   const [chartData, setChartData] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [reviews, setReviews] = useState([])
+  const [reviewsTotal, setReviewsTotal] = useState(0)
+  const [reviewsPage, setReviewsPage] = useState(1)
+  const [reviewsPageSize] = useState(20)
+  const [reviewsLoading, setReviewsLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -1411,6 +1416,40 @@ function ProductDetailPage() {
     load()
     return () => { cancelled = true }
   }, [productId, groupBy, periodDays, dateFrom, dateTo, navigate])
+
+  useEffect(() => {
+    setReviewsPage(1)
+  }, [productId, dateFrom, dateTo])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      setReviewsLoading(true)
+      try {
+        const params = new URLSearchParams({
+          product_ids: productId,
+          page: String(reviewsPage),
+          page_size: String(reviewsPageSize),
+          status: 'all',
+        })
+        if (dateFrom) params.set('date_from', dateFrom)
+        if (dateTo) params.set('date_to', dateTo)
+        const res = await authenticatedFetch(`/api/reviews/?${params}`)
+        if (res.status === 401) { clearTokens(); navigate('/login'); return }
+        const data = await res.json().catch(() => ({}))
+        if (!cancelled) {
+          setReviews(Array.isArray(data.results) ? data.results : [])
+          setReviewsTotal(data.total ?? 0)
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setReviewsLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [productId, dateFrom, dateTo, reviewsPage, reviewsPageSize, navigate])
 
   const n = chartData.length
   const totalReviews = chartData.reduce((s, d) => s + d.count, 0)
@@ -1795,6 +1834,73 @@ function ProductDetailPage() {
             </section>
 
           </div>
+
+          {/* Reviews list */}
+          <section className="panel pbiChartPanel">
+            <div className="pbiChartHead">
+              <div>
+                <h2 className="pbiChartTitle">Отзывы по товару</h2>
+                <p className="pbiChartSub">
+                  {reviewsLoading ? 'Загрузка...' : `${reviewsTotal.toLocaleString('ru-RU')} отзывов`}
+                </p>
+              </div>
+            </div>
+            <div className="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Номер заказа</th>
+                    <th>Товар</th>
+                    <th>Телефон</th>
+                    <th>Оценка</th>
+                    <th>👍</th>
+                    <th>Дата</th>
+                    <th>Статус</th>
+                    <th>Действие</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reviews.map((review) => (
+                    <tr key={review.order_number} className={!review.is_reviewed ? 'unreadRow' : ''}>
+                      <td className={`mono ${!review.is_reviewed ? 'unreadText' : ''}`}>{review.order_number}</td>
+                      <td>{review?.review_dict?.product?.name || 'Нет данных'}</td>
+                      <td>{summaryValue(review, 'phone_number')}</td>
+                      <td>
+                        <span className={`ratingBadge ${getRatingMeta(summaryValue(review, 'rating')).className}`}>
+                          {getRatingMeta(summaryValue(review, 'rating')).text}
+                        </span>
+                      </td>
+                      <td className="mono">{review?.review_dict?.feedback?.positive ?? '—'}</td>
+                      <td>{summaryValue(review, 'date')}</td>
+                      <td>
+                        <span className={`statusBadge ${review.is_reviewed ? 'read' : 'unread'}`}>
+                          {review.is_reviewed ? 'Просмотрено' : 'Не просмотрено'}
+                        </span>
+                      </td>
+                      <td>
+                        <button type="button" className="openBtn" onClick={() => navigate(`/reviews/${review.order_number}`)}>
+                          Открыть →
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!reviewsLoading && !reviews.length && <p className="sub">Отзывы не найдены</p>}
+            </div>
+            {reviewsTotal > reviewsPageSize && (
+              <div className="paginationBar">
+                <div className="paginationInfo">
+                  Показано: {reviews.length} из {reviewsTotal}
+                </div>
+                <div className="paginationControls">
+                  <button type="button" onClick={() => setReviewsPage((p) => Math.max(1, p - 1))} disabled={reviewsPage === 1}>‹</button>
+                  <span className="paginationInfo">Стр. {reviewsPage} / {Math.ceil(reviewsTotal / reviewsPageSize)}</span>
+                  <button type="button" onClick={() => setReviewsPage((p) => p + 1)} disabled={reviewsPage >= Math.ceil(reviewsTotal / reviewsPageSize)}>›</button>
+                </div>
+              </div>
+            )}
+          </section>
         </>
       )}
     </main>
