@@ -15,7 +15,8 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.generic import TemplateView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -26,4 +27,6 @@ urlpatterns = [
     path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    # Serve React SPA for all non-API routes
+    re_path(r'^(?!api/).*$', TemplateView.as_view(template_name='index.html')),
 ]
