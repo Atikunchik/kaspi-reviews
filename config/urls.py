@@ -28,5 +28,5 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     # Serve React SPA for all non-API routes
-    re_path(r'^(?!api/).*$', TemplateView.as_view(template_name='index.html')),
+    re_path(r'^(?!api/|admin/|static/).*$', TemplateView.as_view(template_name='index.html')),
 ]
