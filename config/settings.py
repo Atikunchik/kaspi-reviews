@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import logging.handlers
 import os
 from pathlib import Path
 
@@ -160,4 +161,53 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "Kaspi Reviews API",
     "DESCRIPTION": "CRUD API for reviews stored in MongoDB.",
     "VERSION": "1.0.0",
+}
+
+# Logging
+_log_handlers: dict = {
+    "console": {
+        "class": "logging.StreamHandler",
+        "formatter": "verbose",
+    },
+}
+_log_dir = os.getenv("LOG_DIR", "")
+if _log_dir:
+    Path(_log_dir).mkdir(parents=True, exist_ok=True)
+    _log_handlers["file"] = {
+        "class": "logging.handlers.RotatingFileHandler",
+        "filename": str(Path(_log_dir) / "app.log"),
+        "maxBytes": 10 * 1024 * 1024,  # 10 MB
+        "backupCount": 5,
+        "formatter": "verbose",
+    }
+
+_active_handlers = list(_log_handlers.keys())
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{asctime} {levelname} [{name}] {message}",
+            "style": "{",
+        },
+    },
+    "handlers": _log_handlers,
+    "loggers": {
+        "django.request": {
+            "handlers": _active_handlers,
+            "level": "ERROR",
+            "propagate": False,
+        },
+        "django.security": {
+            "handlers": _active_handlers,
+            "level": "ERROR",
+            "propagate": False,
+        },
+        "main": {
+            "handlers": _active_handlers,
+            "level": "DEBUG" if DEBUG else "INFO",
+            "propagate": False,
+        },
+    },
 }

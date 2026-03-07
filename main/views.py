@@ -1,7 +1,10 @@
+import logging
 import re
 from datetime import datetime, timedelta
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 from drf_spectacular.utils import extend_schema
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
@@ -167,7 +170,11 @@ class ReviewListCreateView(APIView):
             }
         })
 
-        facet_result = list(collection.aggregate(pipeline))
+        try:
+            facet_result = list(collection.aggregate(pipeline))
+        except Exception as e:
+            logger.error("MongoDB aggregation failed in ReviewListCreateView.get: %s", e, exc_info=True)
+            return Response({"detail": "Database error."}, status=500)
         facet = facet_result[0] if facet_result else {"total": [], "data": []}
         total = facet["total"][0]["count"] if facet["total"] else 0
 

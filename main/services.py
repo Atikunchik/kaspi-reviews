@@ -1,9 +1,13 @@
+import logging
 import os
+import time
 
 import requests
 from django.conf import settings
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
+
+logger = logging.getLogger(__name__)
 
 _mongo_client = None
 
@@ -11,7 +15,13 @@ _mongo_client = None
 def _get_mongo_client() -> MongoClient:
     global _mongo_client
     if _mongo_client is None:
-        _mongo_client = MongoClient(settings.MONGODB_URI)
+        logger.info("Connecting to MongoDB: %s", settings.MONGODB_URI)
+        try:
+            _mongo_client = MongoClient(settings.MONGODB_URI)
+            logger.info("MongoDB connection established")
+        except Exception as e:
+            logger.error("Failed to connect to MongoDB: %s", e, exc_info=True)
+            raise
     return _mongo_client
 
 
@@ -93,11 +103,27 @@ class KaspiShopParserClient:
     def get_all_reviews(self, merchant: str = "1Fit", limit: int = 10) -> list:
         headers = {**self.HEADERS, "Cookie": os.getenv("KASPI_COOKIE", "")}
         url = f"https://kaspi.kz/yml/review-view/api/v1/reviews/merchant/{merchant}?limit={limit}&page=0&sort=DATE&days=365"
-        response = requests.get(
-            url=url,
-            headers=headers,
-        )
-        return response.json()
+        logger.info("Kaspi API → GET %s", url)
+        start = time.monotonic()
+        try:
+            response = requests.get(url=url, headers=headers, timeout=30)
+            elapsed = time.monotonic() - start
+            logger.info(
+                "Kaspi API ← status=%d elapsed=%.2fs merchant=%s",
+                response.status_code, elapsed, merchant,
+            )
+            if not response.ok:
+                logger.error(
+                    "Kaspi API non-2xx: status=%d merchant=%s body=%s",
+                    response.status_code, merchant, response.text[:300],
+                )
+            return response.json()
+        except requests.exceptions.Timeout:
+            logger.error("Kaspi API timeout after %.2fs: %s", time.monotonic() - start, url)
+            raise
+        except requests.exceptions.RequestException as e:
+            logger.error("Kaspi API request failed: %s", e, exc_info=True)
+            raise
 
     def parse_all_reviews(self, limit: int = 10) -> list:
         merchants_ids = [
@@ -105,22 +131,30 @@ class KaspiShopParserClient:
             for mid in os.getenv("KASPI_MERCHANT_IDS", "").split(",")
             if mid.strip()
         ]
+        logger.info("Starting review parse for %d merchant(s): %s", len(merchants_ids), merchants_ids)
         for merchant_id in merchants_ids:
-            reviews = self.get_all_reviews(merchant_id, limit)["data"]
-            for review in reviews:
-                created = mongo_review_service.save_if_not_exists(
-                    order_number=review["orderNumber"],
-                    review_dict=review,
-                )
-                if created:
-                    product = review.get("product", {}) or {}
-                    product_id = str(product.get("id", "")).strip()
-                    product_name = str(product.get("name", "")).strip()
-                    merchant_code = str(review.get("merchant", {}).get("code", "")).strip()
-                    mongo_product_id_service.save(
-                        product_id=product_id,
-                        product_name=product_name,
-                        merchant_code=merchant_code,
+            try:
+                reviews = self.get_all_reviews(merchant_id, limit)["data"]
+                logger.info("Fetched %d reviews for merchant %s", len(reviews), merchant_id)
+                created_count = 0
+                for review in reviews:
+                    created = mongo_review_service.save_if_not_exists(
+                        order_number=review["orderNumber"],
+                        review_dict=review,
                     )
+                    if created:
+                        created_count += 1
+                        product = review.get("product", {}) or {}
+                        product_id = str(product.get("id", "")).strip()
+                        product_name = str(product.get("name", "")).strip()
+                        merchant_code = str(review.get("merchant", {}).get("code", "")).strip()
+                        mongo_product_id_service.save(
+                            product_id=product_id,
+                            product_name=product_name,
+                            merchant_code=merchant_code,
+                        )
+                logger.info("Saved %d new review(s) for merchant %s", created_count, merchant_id)
+            except Exception as e:
+                logger.error("Failed to parse reviews for merchant %s: %s", merchant_id, e, exc_info=True)
 
 kaspi_shop_shop_parser = KaspiShopParserClient()
