@@ -134,6 +134,9 @@ class KaspiShopParserClient:
                 )
                 last_exc = e
 
+            if attempt < self.MAX_RETRIES:
+                time.sleep(5)
+
         if last_exc:
             logger.error(
                 "Kaspi API failed after %d attempts for merchant=%s: %s",
