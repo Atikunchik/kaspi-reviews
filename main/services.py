@@ -15,10 +15,8 @@ _mongo_client = None
 def _get_mongo_client() -> MongoClient:
     global _mongo_client
     if _mongo_client is None:
-        logger.info("Connecting to MongoDB: %s", settings.MONGODB_URI)
         try:
             _mongo_client = MongoClient(settings.MONGODB_URI)
-            logger.info("MongoDB connection established")
         except Exception as e:
             logger.error("Failed to connect to MongoDB: %s", e, exc_info=True)
             raise
@@ -107,31 +105,15 @@ class KaspiShopParserClient:
         url = f"https://kaspi.kz/yml/review-view/api/v1/reviews/merchant/{merchant}?limit={limit}&page=0&sort=DATE&days=365"
         proxy_url = os.getenv("KASPI_PROXY_URL", "")
         proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
-        logger.info("Kaspi API → GET %s (proxy=%s)", url, bool(proxies))
 
         last_exc = None
         for attempt in range(1, self.MAX_RETRIES + 1):
-            start = time.monotonic()
             try:
                 response = requests.get(url=url, headers=headers, proxies=proxies, timeout=30)
-                elapsed = time.monotonic() - start
-                logger.info(
-                    "Kaspi API ← status=%d elapsed=%.2fs merchant=%s attempt=%d",
-                    response.status_code, elapsed, merchant, attempt,
-                )
                 if response.ok:
                     return response.json()
-                logger.warning(
-                    "Kaspi API non-2xx: status=%d merchant=%s attempt=%d/%d body=%s",
-                    response.status_code, merchant, attempt, self.MAX_RETRIES, response.text[:300],
-                )
                 last_exc = None
             except requests.exceptions.RequestException as e:
-                elapsed = time.monotonic() - start
-                logger.warning(
-                    "Kaspi API request error: %s elapsed=%.2fs merchant=%s attempt=%d/%d",
-                    e, elapsed, merchant, attempt, self.MAX_RETRIES,
-                )
                 last_exc = e
 
             if attempt < self.MAX_RETRIES:
@@ -155,19 +137,15 @@ class KaspiShopParserClient:
             for mid in os.getenv("KASPI_MERCHANT_IDS", "").split(",")
             if mid.strip()
         ]
-        logger.info("Starting review parse for %d merchant(s): %s", len(merchants_ids), merchants_ids)
         for merchant_id in merchants_ids:
             try:
                 reviews = self.get_all_reviews(merchant_id, limit)["data"]
-                logger.info("Fetched %d reviews for merchant %s", len(reviews), merchant_id)
-                created_count = 0
                 for review in reviews:
                     created = mongo_review_service.save_if_not_exists(
                         order_number=review["orderNumber"],
                         review_dict=review,
                     )
                     if created:
-                        created_count += 1
                         product = review.get("product", {}) or {}
                         product_id = str(product.get("id", "")).strip()
                         product_name = str(product.get("name", "")).strip()
@@ -177,7 +155,6 @@ class KaspiShopParserClient:
                             product_name=product_name,
                             merchant_code=merchant_code,
                         )
-                logger.info("Saved %d new review(s) for merchant %s", created_count, merchant_id)
             except Exception as e:
                 logger.error("Failed to parse reviews for merchant %s: %s", merchant_id, e, exc_info=True)
 
