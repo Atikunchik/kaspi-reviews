@@ -100,32 +100,51 @@ class KaspiShopParserClient:
 
     BASE_URL = "https://kaspi.kz/yml"
 
+    MAX_RETRIES = 10
+
     def get_all_reviews(self, merchant: str = "1Fit", limit: int = 10) -> list:
         headers = {**self.HEADERS, "Cookie": os.getenv("KASPI_COOKIE", "")}
         url = f"https://kaspi.kz/yml/review-view/api/v1/reviews/merchant/{merchant}?limit={limit}&page=0&sort=DATE&days=365"
         proxy_url = os.getenv("KASPI_PROXY_URL", "")
         proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
         logger.info("Kaspi API → GET %s (proxy=%s)", url, bool(proxies))
-        start = time.monotonic()
-        try:
-            response = requests.get(url=url, headers=headers, proxies=proxies, timeout=30)
-            elapsed = time.monotonic() - start
-            logger.info(
-                "Kaspi API ← status=%d elapsed=%.2fs merchant=%s",
-                response.status_code, elapsed, merchant,
-            )
-            if not response.ok:
-                logger.error(
-                    "Kaspi API non-2xx: status=%d merchant=%s body=%s",
-                    response.status_code, merchant, response.text[:300],
+
+        last_exc = None
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            start = time.monotonic()
+            try:
+                response = requests.get(url=url, headers=headers, proxies=proxies, timeout=30)
+                elapsed = time.monotonic() - start
+                logger.info(
+                    "Kaspi API ← status=%d elapsed=%.2fs merchant=%s attempt=%d",
+                    response.status_code, elapsed, merchant, attempt,
                 )
-            return response.json()
-        except requests.exceptions.Timeout:
-            logger.error("Kaspi API timeout after %.2fs: %s", time.monotonic() - start, url)
-            raise
-        except requests.exceptions.RequestException as e:
-            logger.error("Kaspi API request failed: %s", e, exc_info=True)
-            raise
+                if response.ok:
+                    return response.json()
+                logger.warning(
+                    "Kaspi API non-2xx: status=%d merchant=%s attempt=%d/%d body=%s",
+                    response.status_code, merchant, attempt, self.MAX_RETRIES, response.text[:300],
+                )
+                last_exc = None
+            except requests.exceptions.RequestException as e:
+                elapsed = time.monotonic() - start
+                logger.warning(
+                    "Kaspi API request error: %s elapsed=%.2fs merchant=%s attempt=%d/%d",
+                    e, elapsed, merchant, attempt, self.MAX_RETRIES,
+                )
+                last_exc = e
+
+        if last_exc:
+            logger.error(
+                "Kaspi API failed after %d attempts for merchant=%s: %s",
+                self.MAX_RETRIES, merchant, last_exc, exc_info=True,
+            )
+            raise last_exc
+        logger.error(
+            "Kaspi API returned non-2xx after %d attempts for merchant=%s",
+            self.MAX_RETRIES, merchant,
+        )
+        raise requests.exceptions.HTTPError(f"Kaspi API non-2xx after {self.MAX_RETRIES} attempts")
 
     def parse_all_reviews(self, limit: int = 10) -> list:
         merchants_ids = [
