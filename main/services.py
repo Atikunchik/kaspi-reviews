@@ -103,10 +103,12 @@ class KaspiShopParserClient:
     def get_all_reviews(self, merchant: str = "1Fit", limit: int = 10) -> list:
         headers = {**self.HEADERS, "Cookie": os.getenv("KASPI_COOKIE", "")}
         url = f"https://kaspi.kz/yml/review-view/api/v1/reviews/merchant/{merchant}?limit={limit}&page=0&sort=DATE&days=365"
-        logger.info("Kaspi API → GET %s", url)
+        proxy_url = os.getenv("KASPI_PROXY_URL", "")
+        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        logger.info("Kaspi API → GET %s (proxy=%s)", url, bool(proxies))
         start = time.monotonic()
         try:
-            response = requests.get(url=url, headers=headers, timeout=30)
+            response = requests.get(url=url, headers=headers, proxies=proxies, timeout=30)
             elapsed = time.monotonic() - start
             logger.info(
                 "Kaspi API ← status=%d elapsed=%.2fs merchant=%s",
